@@ -1,0 +1,5 @@
+*.sh~
+*.bak
+*.tmp
+*~
+.DS_Store
