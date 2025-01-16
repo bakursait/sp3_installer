@@ -2,7 +2,19 @@
 
 # Export Variables:
 MAIN_DIRECTORY_LOCATION="$(cd "$(dirname "$0")" && pwd)"
-source "$MAIN_DIRECTORY_LOCATION/script_variables.sh"
+SUPPORTING_FILES="${MAIN_DIRECTORY_LOCATION}/sp3_supporting_files"
+# Define variables
+RANDOM_UUID="$(uuidgen)"
+SP_ENTITY_ID="http://devstack.sait.${RANDOM_UUID}/shibboleth"
+SP_METADATA_FILE="/etc/shibboleth/devstack.sait.${RANDOM_UUID}-metadata.xml"
+SHIBBOLETH_XML="/etc/shibboleth/shibboleth2.xml"
+
+DEVSTACK_BRANCH="stable/2023.2"
+STACK_USER="stack"
+DEVSTACK_HOME="/opt/stack"
+HOST_IP="192.168.4.121"
+ADMIN_PASSWORD="secret"
+
 
 
 # Ensure non-interactive mode for apt
@@ -13,15 +25,63 @@ echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
 usage(){
-    echo "Usage: $0 {devstack|shibsp}"
+    echo "Usage: $0 {devstack|shibsp|configure_shibsp}"
     echo "You must specify at least one option to run the script."
     exit 1
 }
 
 
+DEBUG=0
+if [[ "$1" == "--debug" ]]; then
+    DEBUG=1
+    shift
+fi
+
+log_debug() {
+    if [[ $DEBUG -eq 1 ]]; then
+        echo "$@"
+    fi
+}
+
+log_debug "Debugging enabled"
+
 # Setup Devstack:
 #source "$MAIN_DIRECTORY_LOCATION/setup_devstack.sh"
 
+
+add_idps(){
+    echo "Adding IdP metadata from CSV file..."
+    local idp_csv_file="${SUPPORTING_FILES}/idp_list.csv"
+    cat $idp_csv_file
+    # Check if the CSV file exists
+    if [[ ! -f "$idp_csv_file" ]]; then
+        echo "Error: $idp_csv_file not found."
+        exit 1
+    fi
+    # Read the CSV file line by line, skipping the header
+    tail -n +2 "$idp_csv_file" | while IFS=";" read -r idp_entity_id idp_backup_file idp_keystone_name idp_horizon_name idp_mapping_rules; do
+	echo "Processing IdP: $idp_entity_id"
+	if grep -q "<MetadataProvider .* url=\"$idp_entity_id\"" "${SHIBBOLETH_XML}"; then
+	    echo "The IdP: \"$idp_entity_id\", is alredy register in: \"${SHIBBOLETH_XML}\"... Skip it"
+	    continue
+	fi
+	# Use sed to add the MetadataProvider entry after <Errors />
+	# add validate=\"true\"
+	sudo sed -i "/<Errors/s|/>|/>\n\n    <MetadataProvider type=\"XML\" validate=\"true\" url=\"$idp_entity_id\" backingFilePath=\"$idp_backup_file\" maxRefreshDelay=\"720000\" />|" "${SHIBBOLETH_XML}" || { echo "failed adding idps. Check logs."; exit 1; }
+    done
+}
+
+
+validate_xml_file(){
+    xml_file=$1
+    # Validate the XML file
+    if xmlstarlet val -e "$xml_file"; then
+	echo "XML validation passed for the file: ${xml_file}. Metadata added successfully."
+    else
+	echo "XML validation failed for the file: ${xml_file}. Check the file for errors."
+	exit 1
+    fi
+}
 
 setup_devstack() {
     # Step 1: Add stack user
@@ -101,7 +161,7 @@ install_shib_sp() {
 
     # Step 2: Install required packages
     echo "Installing required packages..."
-    sudo apt install -y ca-certificates emacs openssl
+    sudo apt install -y ca-certificates emacs openssl xmlstarlet
 
     # Step 3: Install Shibboleth SP
     echo "Installing Shibboleth SP and related packages..."
@@ -115,14 +175,25 @@ install_shib_sp() {
     echo "Shibboleth SP installation complete!"
 }
 
+
+
+
+
+
+
 configure_shib_sp() {
     echo "Starting Shibboleth SP configuration..."
 
-    # Define variables
-    SP_ENTITY_ID="http://devstack.sait.$(uuidgen)/shibboleth"
-    IDP_ENTITY_ID="https://idp.bakursait.cloud/idp/shibboleth"
-    IDP_METADATA_URL="https://idp.bakursait.cloud/idp/shibboleth"
-    SP_METADATA_FILE="/etc/shibboleth/devstack.sait.$(uuidgen)-metadata.xml"
+    # Backup the original Shibboleth XML file
+    sudo cp "$SHIBBOLETH_XML" "${SHIBBOLETH_XML}.bak"
+    sudo chown _shibd: "${SHIBBOLETH_XML}.bak"
+
+
+    if [[ ! -d "$SUPPORTING_FILES" ]]; then
+	echo "Error: Supporting files directory ${SUPPORTING_FILES} does not exist."
+	exit 1
+    fi
+    
 
     # Step 1: Verify shibd service status (expect errors initially)
     echo "Testing Shibboleth daemon (expected errors)..."
@@ -146,35 +217,40 @@ configure_shib_sp() {
 
     # Step 5: Update /etc/shibboleth/shibboleth2.xml
     echo "Updating /etc/shibboleth/shibboleth2.xml with SP EntityID..."
-    sudo sed -i "s|entityID=\".*\"|entityID=\"$SP_ENTITY_ID\"|g" /etc/shibboleth/shibboleth2.xml
-
+    sudo xmlstarlet ed --inplace -N sp="urn:mace:shibboleth:3.0:native:sp:config" \
+         -u '//_:ApplicationDefaults/@entityID' -v "${SP_ENTITY_ID}" /etc/shibboleth/shibboleth2.xml
+    
     echo "Configuring <Sessions> directive..."
-    sudo sed -i '/<Sessions/s|handlerSSL=".*"|handlerSSL="false"|g' /etc/shibboleth/shibboleth2.xml
-    sudo sed -i '/<Sessions/s|cookieProps=".*"|cookieProps="http"|g' /etc/shibboleth/shibboleth2.xml
+    sudo xmlstarlet ed --inplace -N sp="urn:mace:shibboleth:3.0:native:sp:config" \
+        -u '//_:Sessions/@handlerSSL' -v 'false' /etc/shibboleth/shibboleth2.xml
+    sudo xmlstarlet ed --inplace -N sp="urn:mace:shibboleth:3.0:native:sp:config" \
+         -u '//_:Sessions/@cookieProps' -v 'http' /etc/shibboleth/shibboleth2.xml
 
-    echo "Adding IdP entityID to <SSO> directive..."
-    sudo sed -i "s|<SSO entityID=\".*\">|<SSO entityID=\"$IDP_ENTITY_ID\">|g" /etc/shibboleth/shibboleth2.xml
 
-    echo "Adding IdP metadata URL to <MetadataProvider>..."
-    sudo sed -i "/<MetadataProvider/s|url=\".*\"|url=\"$IDP_METADATA_URL\"|g" /etc/shibboleth/shibboleth2.xml
-    sudo sed -i "/<MetadataProvider/s|backingFilePath=\".*\"|backingFilePath=\"${SP_METADATA_FILE}\"|g" /etc/shibboleth/shibboleth2.xml
 
-    # Step 6: Restart services to apply changes
+    
+
+    # Step 6: Add IdP metadata from CSV file
+    add_idps
+    
+
+    validate_xml_file "$SHIBBOLETH_XML"
+
+    echo "Shibboleth SP configuration complete!"
+
+    # Step 7: Restart services to apply changes
     echo "Restarting services to apply changes..."
     sudo systemctl restart shibd.service
     sudo systemctl restart apache2.service
+
+    # Step 8: Test shibd configuration
+    echo "Testing Shibboleth daemon configuration..."
     sudo shibd -t || { echo "shibd configuration test failed. Check logs."; exit 1; }
 
-    # Step 7: Generate SP metadata
-    echo "Generating SP metadata..."
-    sudo wget "http://192.168.4.100/Shibboleth.sso/Metadata" -O "$SP_METADATA_FILE"
-
-    # Step 8: Update attribute-map.xml (example: map attributes as needed)
-    echo "Allowing mapped attributes in /etc/shibboleth/attribute-map.xml..."
-    sudo sed -i '/attribute-map.xml/s|<!--<Attribute name=".*"/>-->|<Attribute name="eppn"/>|g' /etc/shibboleth/attribute-map.xml
-
     echo "Shibboleth SP configuration complete!"
-    echo "SP metadata available at $SP_METADATA_FILE"
+    sudo wget "http://${HOST_IP}/Shibboleth.sso/Metadata" -O "${SP_METADATA_FILE}"
+    sudo chown _shibd: "${SP_METADATA_FILE}"
+    echo "SP metadata available at ${SP_METADATA_FILE}"
 }
 
 
@@ -188,17 +264,19 @@ fi
 # Execute the requested functions:
 for option in "$@"; do
     case $option in
-	devstack)
-	#setup_devstack
-	#usage
-	    ;;
-	shibsp)
-	    setup_shib_sp
-	    ;;
-	*)
-	    echo "Invalid option: $option"
-	    usage
-	    ;;
+        devstack)
+            setup_devstack
+            ;;
+        shibsp)
+            install_shib_sp
+            ;;
+        configure_shibsp)
+            configure_shib_sp
+            ;;
+        *)
+            echo "Invalid option: $option"
+            usage
+            ;;
     esac
 done
 

@@ -1,0 +1,3 @@
+idp_entity_id;idp_backup_file;idp_keystone_name;idp_horizon_name;idp_mapping_rules
+https://idp.localtest/idp/shibboleth;idp.localtest-metadata.xml;demoidp;demoidp;demoidp
+https://idp.localtest1/idp/shibboleth;idp.localtest1-metadata.xml;demoidp1;demoidp1;demoidp1
