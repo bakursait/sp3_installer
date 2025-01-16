@@ -16,6 +16,10 @@ HOST_IP="192.168.4.121"
 ADMIN_PASSWORD="secret"
 
 
+KEYSTONE_MAIN_CONF="/etc/keystone/keystone.conf"
+HORIZON_SETTINGS_FILE="~/horizon/openstack_dashboard/local/local_settings.py"
+
+
 
 # Ensure non-interactive mode for apt
 export DEBIAN_FRONTEND=noninteractive
@@ -251,6 +255,84 @@ configure_shib_sp() {
     sudo wget "http://${HOST_IP}/Shibboleth.sso/Metadata" -O "${SP_METADATA_FILE}"
     sudo chown _shibd: "${SP_METADATA_FILE}"
     echo "SP metadata available at ${SP_METADATA_FILE}"
+
+    # Step 9: copy attribute-map.xml file to the shibboleth working directory:
+    sudo cp "${SUPPORTING_FILES}/attribute-map.xml" /etc/shibboleth/
+
+
+    configure_keystone_debugging
+}
+
+
+
+# Function to enable debugging for Keystone
+configure_keystone_debugging() {
+    # we  Must Run it as user: stack
+    echo "Configuring Keystone debugging..."
+
+    if [ -z "$STACK_USER" ] || [ -z "$KEYSTONE_MAIN_CONF" ]; then
+	echo "Error: STACK_USER or KEYSTONE_MAIN_CONF is not defined."
+	exit 1
+    fi
+    
+    
+    # switch to the stack usre and perform the operations:
+    sudo -i -u $STACK_USER bash <<EOF
+cd $DEVSTACK_HOME || { echo "Error: Cannot access $DEVSTACK_HOME"; exit 1; }
+
+#    # Check if the configuration file exists
+#    if [ ! -f "$KEYSTONE_MAIN_CONF" ]; then
+#        echo "Error: Configuration file $KEYSTONE_MAIN_CONF does not exist."
+#        exit 1
+#    fi
+
+
+    for setting in "debug = True" "insecure_debug = True" "log_dir = /var/log/keystone" "log_file = keystone.log"; do
+	key=\$(echo "\$setting" | awk -F'=' '{print \$1}' | xargs)
+	value=\$(echo "\$setting" | awk -F'=' '{print \$2}' | xargs)
+	if ! grep -q "^\s*\${key}\s*=\s*\${value}" "$KEYSTONE_MAIN_CONF"; then
+	    echo "Adding '\${setting}' to [DEFAULT] section."
+            sudo sed -i "/^\[DEFAULT\]/a \${setting}" "$KEYSTONE_MAIN_CONF"
+	else
+	    echo "'\${setting}' is already configured."
+	fi
+    done  
+    
+    
+    # add [log] section and its contents:
+    grep -q '^\[log\]' "$KEYSTONE_MAIN_CONF" || echo -e "\n\n[log]" | sudo tee -a "$KEYSTONE_MAIN_CONF"
+    
+    # Add or update the level setting in the [log] section
+    if ! grep -q '^\s*level\s*=\s*DEBUG' "$KEYSTONE_MAIN_CONF"; then
+        echo "Adding 'level = DEBUG' to [log] section."
+        sudo sed -i '/^\[log\]/a level = DEBUG' "$KEYSTONE_MAIN_CONF"
+    else
+        echo "'level = DEBUG' is already configured in [log] section."
+    fi
+
+    sudo chown stack:stack "$KEYSTONE_MAIN_CONF"
+    
+    # Create log directory if not exists
+    sudo mkdir -p /var/log/keystone
+    sudo chown -R stack:stack /var/log/keystone
+
+    # Restart Keystone service
+    echo "Restarting Keystone service..."
+    sudo systemctl restart devstack@keystone.service
+
+    # Validate service status
+    if systemctl is-active --quiet devstack@keystone.service; then
+        echo "Keystone service restarted successfully."
+    else
+        echo "Error: Keystone service failed to restart. Check the logs for details."
+    fi
+
+EOF
+
+
+    
+    
+    echo "Keystone debugging configured."
 }
 
 
