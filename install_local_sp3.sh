@@ -29,7 +29,7 @@ echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
 usage(){
-    echo "Usage: $0 {devstack|shibsp|configure_shibsp}"
+    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso}"
     echo "You must specify at least one option to run the script."
     exit 1
 }
@@ -354,7 +354,22 @@ EOF
 }
 
 
+configure_horizon_websso(){
+    echo "Configuring Horizon for SSO..."
+    sudo chown stack:stack "$MAIN_DIRECTORY_LOCATION/configure_horizon.py"
+    sudo chmod 744 "$MAIN_DIRECTORY_LOCATION/configure_horizon.py"
 
+    sudo -i -u $STACK_USER bash <<EOF
+cd $DEVSTACK_HOME || { echo "Error: Cannot access $DEVSTACK_HOME"; exit 1; }
+python3 $MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py
+if [ $? -eq 0 ]; then
+   echo "Horizon configuration completed successfully."
+else
+   echo "Error occurred during Horizon configuration."
+   exit 1
+fi
+EOF
+}
 
 
 if [[ $# -eq 0 ]]; then
@@ -372,6 +387,9 @@ for option in "$@"; do
             ;;
         configure_shibsp)
             configure_shib_sp
+            ;;
+        horizon_websso)
+            configure_horizon_websso
             ;;
         *)
             echo "Invalid option: $option"
