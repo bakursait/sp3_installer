@@ -145,7 +145,25 @@ echo "Starting DevStack installation. This might take some time..."
 ./stack.sh || { echo "DevStack installation failed"; exit 1; }
 EOF
 
-    # Step 10: Test Accessing Horizon
+
+
+    # Step 10.1: Update and upgrade the system
+    echo "Updating and upgrading system packages..."
+    sudo apt update && sudo apt-get upgrade -y --no-install-recommends
+
+    # Step 10.2: Install required Access Control List (acl) package
+    echo "Installing ACL package..."
+    sudo apt install -y acl
+
+    # Step 11: let the user: "$STACK_USER" have access to all required files in the original $USER's home directory
+    sudo setfacl -R -m u:$STACK_USER:r-x "$HOME"
+    sudo setfacl -R -d -m u:$STACK_USER:r-x "$HOME"
+
+    sudo setfacl -R -m u:$STACK_USER:r-x "$MAIN_DIRECTORY_LOCATION"
+    sudo setfacl -R -d -m u:$STACK_USER:r-x "$MAIN_DIRECTORY_LOCATION"
+
+    
+    # Step 12: Test Accessing Horizon
     echo "DevStack installation complete!"
     echo "You can access the Horizon dashboard at: http://$HOST_IP/dashboard"
 }
