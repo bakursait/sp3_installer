@@ -11,7 +11,8 @@ SHIBBOLETH_XML="/etc/shibboleth/shibboleth2.xml"
 
 DEVSTACK_BRANCH="stable/2023.2"
 STACK_USER="stack"
-DEVSTACK_HOME="/opt/stack"
+STACK_USER_HOME="/opt/${STACK_USER}"
+DEVSTACK_HOME="${STACK_USER_HOME}/devstack"
 HOST_IP="192.168.4.121"
 ADMIN_PASSWORD="secret"
 
@@ -29,7 +30,7 @@ echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
 usage(){
-    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso}"
+    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli}"
     echo "You must specify at least one option to run the script."
     exit 1
 }
@@ -52,6 +53,15 @@ log_debug "Debugging enabled"
 # Setup Devstack:
 #source "$MAIN_DIRECTORY_LOCATION/setup_devstack.sh"
 
+is_file_exist() {
+    # Check if the CSV file exists
+    if [[ -f "$1" ]]; then
+        return 0  # File exists (success)
+    else
+        return 1  # File does not exist (failure)
+    fi
+}
+
 
 add_idps(){
     echo "Adding IdP metadata from CSV file..."
@@ -63,7 +73,7 @@ add_idps(){
         exit 1
     fi
     # Read the CSV file line by line, skipping the header
-    tail -n +2 "$idp_csv_file" | while IFS=";" read -r idp_entity_id idp_backup_file idp_keystone_name idp_horizon_name idp_mapping_rules; do
+    tail -n +2 "$idp_csv_file" | while IFS=";" read -r fqdn idp_entity_id idp_backup_file idp_keystone_name idp_horizon_name idp_mapping_rules; do
 	echo "Processing IdP: $idp_entity_id"
 	if grep -q "<MetadataProvider .* url=\"$idp_entity_id\"" "${SHIBBOLETH_XML}"; then
 	    echo "The IdP: \"$idp_entity_id\", is alredy register in: \"${SHIBBOLETH_XML}\"... Skip it"
@@ -91,7 +101,7 @@ setup_devstack() {
     # Step 1: Add stack user
     if ! id -u $STACK_USER >/dev/null 2>&1; then
 	echo "Adding stack user..."
-	sudo useradd -s /bin/bash -d $DEVSTACK_HOME -m $STACK_USER
+	sudo useradd -s /bin/bash -d $STACK_USER_HOME -m $STACK_USER
     else
 	echo "User ${STACK_USER} already exists."
     fi
@@ -99,7 +109,7 @@ setup_devstack() {
     
     # Step 2: Set the stack user's home directory executable by ALL
     echo "Setting home directory permissions for $STACK_USER..."
-    sudo  chmod a+x $DEVSTACK_HOME
+    sudo  chmod a+x $STACK_USER_HOME
     
     # Step 3: Give stack user sudo privileges
     if [ ! -f /etc/sudoers.d/$STACK_USER ]; then
@@ -113,7 +123,7 @@ setup_devstack() {
     # Step 4: Switch to stack user and execute the following as stack
     echo "Switching to $STACK_USER and setting up DevStack..."
     sudo -u $STACK_USER bash <<EOF
-cd $DEVSTACK_HOME
+cd $STACK_USER_HOME
 
 # Step 5: Clone DevStack repository
 if [ ! -d devstack ]; then
@@ -296,7 +306,7 @@ configure_keystone_debugging() {
     
     # switch to the stack usre and perform the operations:
     sudo -i -u $STACK_USER bash <<EOF
-cd $DEVSTACK_HOME || { echo "Error: Cannot access $DEVSTACK_HOME"; exit 1; }
+cd $STACK_USER_HOME || { echo "Error: Cannot access $STACK_USER_HOME"; exit 1; }
 
 #    # Check if the configuration file exists
 #    if [ ! -f "$KEYSTONE_MAIN_CONF" ]; then
@@ -356,11 +366,11 @@ EOF
 
 configure_horizon_websso(){
     echo "Configuring Horizon for SSO..."
-    sudo chown stack:stack "$MAIN_DIRECTORY_LOCATION/configure_horizon.py"
-    sudo chmod 744 "$MAIN_DIRECTORY_LOCATION/configure_horizon.py"
+    # sudo chown stack:stack "$MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py"
+    # sudo chmod 744 "$MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py"
 
     sudo -i -u $STACK_USER bash <<EOF
-cd $DEVSTACK_HOME || { echo "Error: Cannot access $DEVSTACK_HOME"; exit 1; }
+cd $STACK_USER_HOME || { echo "Error: Cannot access $STACK_USER_HOME"; exit 1; }
 python3 $MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py
 if [ $? -eq 0 ]; then
    echo "Horizon configuration completed successfully."
@@ -369,7 +379,128 @@ else
    exit 1
 fi
 EOF
+    sudo systemctl restart apache2.service
 }
+
+
+create_federation_resources_at_keystone_cli() {
+    echo "Creating federation resources in Keystone..."
+
+    local idp_csv_file="${SUPPORTING_FILES}/idp_list.csv"
+    if ! is_file_exist $idp_csv_file; then
+        echo "File ${$idp_csv_file} does not exist."
+        exit 1
+    fi
+
+
+    # Ensure we are running as the stack user
+    sudo -u "$STACK_USER" bash << EOF
+    
+    # Move to the DevStack directory
+    cd "$DEVSTACK_HOME" || { echo "Error: Cannot access $DEVSTACK_HOME"; exit 1; }
+    whoami
+    pwd
+
+    # Source OpenStack admin credentials
+    source openrc admin admin
+
+    # test if we can access the cloud resources:
+    openstack image list
+
+    # Read the IDP list from the CSV file
+    idp_csv_file="$SUPPORTING_FILES/idp_list.csv"
+    tail -n +2 "$idp_csv_file" | while IFS=";" read -r fqdn idp_entity_id idp_backup_file idp_keystone_name idp_horizon_name idp_mapping_rules; do
+        echo "Processing Identity Provider: \$idp_keystone_name"
+
+        # Step 1: Create the Identity Provider object
+        if openstack identity provider list | grep -qw "\$idp_keystone_name"; then
+            echo "Identity Provider '\$idp_keystone_name' already exists. Skipping creation."
+        else
+            openstack identity provider create "\$idp_keystone_name" --remote-id "\$idp_entity_id"
+            echo "Identity Provider \"\$idp_keystone_name\" created."
+        fi
+
+        # Step 2: Create the mapping rules JSON file
+        mapping_rules_file="/tmp/\${idp_mapping_rules}_rules.json"
+        cat <<RULES > "\$mapping_rules_file"
+[
+  {
+    "local": [
+      {
+        "user": {
+          "name": "{0}"
+        },
+        "group": {
+          "domain": {
+            "name": "Default"
+          },
+          "name": "federated_users_\${idp_keystone_name}"
+        }
+      }
+    ],
+    "remote": [
+      {
+        "type": "REMOTE_USER"
+      }
+    ]
+  }
+]
+RULES
+
+        # Step 3: Create the mapping object
+        if openstack mapping list | grep -qw "\$idp_mapping_rules"; then
+            echo "Mapping \"\$idp_mapping_rules\" already exists. Skipping creation."
+        else
+            openstack mapping create "\$idp_mapping_rules" --rules "\$mapping_rules_file"
+            echo "Mapping '\$idp_mapping_rules' created."
+        fi
+
+        # Step 4: Create the federated_users group if it doesn't exist
+        if ! openstack group list | grep -qw "federated_users_\${idp_keystone_name}"; then
+            openstack group create "federated_users_\${idp_keystone_name}"
+            echo "Group \"federated_users_\${idp_keystone_name}\" created."
+        else
+            echo "Group \"federated_users_\${idp_keystone_name}\" already exists. Skipping creation."
+        fi
+
+        # Step 5: Create the federated_project project if it doesn't exist
+        if ! openstack project list | grep -qw "federated_project_\${idp_keystone_name}"; then
+            openstack project create "federated_project_\${idp_keystone_name}"
+            echo "Project \"federated_project_\${idp_keystone_name}\" created."
+        else
+            echo "Project \"federated_project_\${idp_keystone_name}\" already exists. Skipping creation."
+        fi
+
+        # Step 6: Assign the member role to the federated_users group in the federated_project
+        if ! openstack role assignment list --group "federated_users_\${idp_keystone_name}" --project "federated_project_\${idp_keystone_name}" | grep -qw "member"; then
+            openstack role add --group "federated_users_\${idp_keystone_name}" --project "federated_project_\${idp_keystone_name}" member
+            echo "Role 'member' assigned to group \"federated_users_\${idp_keystone_name}\" in project \"federated_project_\${idp_keystone_name}\"."
+        else
+            echo "Role 'member' already assigned to group \"federated_users_\${idp_keystone_name}\" in project \"federated_project_\${idp_keystone_name}\"."
+        fi
+
+        # Step 7: Create the federation protocol
+        if openstack federation protocol list --identity-provider "\${idp_keystone_name}" | grep -qw "saml2"; then
+            echo "Federation protocol 'saml2' for Identity Provider \"\$idp_keystone_name\" already exists. Skipping creation."
+        else
+            openstack federation protocol create saml2 --identity-provider "\${idp_keystone_name}" --mapping "\${idp_mapping_rules}"
+            echo "Federation protocol 'saml2' created for Identity Provider \"\${idp_keystone_name}\"."
+        fi
+
+#         # Clean up temporary file
+#         rm -f "$mapping_rules_file"
+
+    done
+EOF
+
+    echo "Federation resources created successfully."
+}
+
+
+
+
+
+
 
 
 if [[ $# -eq 0 ]]; then
@@ -390,6 +521,9 @@ for option in "$@"; do
             ;;
         horizon_websso)
             configure_horizon_websso
+            ;;
+        configure_keystone_cli)
+            create_federation_resources_at_keystone_cli
             ;;
         *)
             echo "Invalid option: $option"
