@@ -30,7 +30,7 @@ echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
 usage(){
-    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli}"
+    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli|configure_keystone_federation}"
     echo "You must specify at least one option to run the script."
     exit 1
 }
@@ -497,9 +497,82 @@ EOF
 }
 
 
+configure_keystone_federation(){
+    echo "Configuring DevStack for SAML Federation..."
+
+    # Define variables
+    local keystone_conf="/etc/keystone/keystone.conf"
+    local sso_template_source="/opt/stack/keystone/etc/sso_callback_template.html"
+    local sso_template_target="/etc/keystone/sso_callback_template.html"
+    local trusted_dashboard_url="http://$HOST_IP/dashboard/auth/websso/"
+    local remote_id_attribute_conf_section="federation"      # saml2 OR federation
 
 
+    if [[ "$remote_id_attribute_conf_section" != "saml2" && "$remote_id_attribute_conf_section" != "federation" ]]; then
+        remote_id_attribute_conf_section="federation"
+    fi
 
+    # Modify Keystone configuration as root
+    sudo bash <<EOF
+    # Update [auth] methods
+    if grep -q '^\[auth\]' "$keystone_conf"; then
+        if grep -q '^methods' "$keystone_conf"; then
+            sed -i 's/^methods\s*=.*/methods = password,token,saml2,openid/' "$keystone_conf"
+        else
+            sed -i '/^\[auth\]/a methods = password,token,saml2,openid' "$keystone_conf"
+        fi
+    else
+        echo -e "\n\n[auth]\nmethods = password,token,saml2,openid" >> "$keystone_conf"
+    fi
+
+    # # Remove 'external' if it exists in methods
+    # sed -i 's/,external//' "$keystone_conf"
+
+
+    # Configure [saml2] or [federation] remote_id_attribute
+    if grep -q '^\[$remote_id_attribute_conf_section\]' "$keystone_conf"; then
+        if ! grep -q 'remote_id_attribute' "$keystone_conf"; then
+            sed -i '/^\[$remote_id_attribute_conf_section\]/a remote_id_attribute = Shib-Identity-Provider' "$keystone_conf"
+        fi
+    else
+        echo -e "\n\n[$remote_id_attribute_conf_section]\nremote_id_attribute = Shib-Identity-Provider" >> "$keystone_conf"
+    fi
+
+
+    # Add trusted_dashboard under [federation]
+    if grep -q '^\[federation\]' "$keystone_conf"; then
+        if ! grep -q 'trusted_dashboard' "$keystone_conf"; then
+            sed -i "/^\[federation\]/a trusted_dashboard = $trusted_dashboard_url" "$keystone_conf"
+        fi
+    else
+        echo -e "\n\n[federation]\ntrusted_dashboard = $trusted_dashboard_url" >> "$keystone_conf"
+    fi
+    
+    
+
+    # Add sso_callback_template
+    if ! grep -q 'sso_callback_template' "$keystone_conf"; then
+        sed -i "/^\[federation\]/a sso_callback_template = $sso_template_target" "$keystone_conf"
+    fi
+
+    # Copy the SSO callback template file
+    if [ ! -f "$sso_template_target" ]; then
+        cp "$sso_template_source" "$sso_template_target"
+    fi
+
+    # Change ownership and permissions
+    chown stack:stack "$keystone_conf"
+    chmod 600 "$keystone_conf"
+EOF
+
+    # Restart Keystone, Apache, and Shibboleth services
+    echo "Restarting services..."
+    sudo systemctl restart devstack@keystone.service
+    sudo systemctl restart apache2.service
+    sudo systemctl restart shibd.service
+
+    echo "DevStack SAML federation configuration completed."
+}
 
 
 
@@ -524,6 +597,9 @@ for option in "$@"; do
             ;;
         configure_keystone_cli)
             create_federation_resources_at_keystone_cli
+            ;;
+        configure_keystone_federation)
+            configure_keystone_federation
             ;;
         *)
             echo "Invalid option: $option"
