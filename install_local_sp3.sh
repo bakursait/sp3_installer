@@ -33,6 +33,7 @@ usage(){
 }
 
 
+
 DEBUG=0
 if [[ "$1" == "--debug" ]]; then
     DEBUG=1
@@ -58,6 +59,34 @@ is_file_exist() {
         return 1  # File does not exist (failure)
     fi
 }
+
+
+
+# Function to check if a command exists
+# $1: Command to check
+# $2: Component name (for error message)
+# $3: Dependency type ("independent" or "dependent")
+check_command_exists() {
+    local cmd="$1"
+    local component_name="$2"
+    local dependency_type="$3"
+
+    if [ "$dependency_type" == "independent" ]; then
+        if type "$cmd" >/dev/null 2>&1; then
+            echo -e "\n\033[1;31mError:\033[0m $component_name is already installed or available. Exiting..."
+            exit 1
+        fi
+    elif [ "$dependency_type" == "dependent" ]; then
+        if ! type "$cmd" >/dev/null 2>&1; then
+            echo -e "\n\033[1;31mError:\033[0m $component_name is NOT installed or available. Please install it first. Exiting..."
+            exit 1
+        fi
+    else
+        echo -e "\n\033[1;31mError:\033[0m Invalid dependency type provided to check_command_exists. Exiting..."
+        exit 1
+    fi
+}
+
 
 
 add_idps(){
@@ -95,6 +124,8 @@ validate_xml_file(){
 }
 
 setup_devstack() {
+    check_command_exists "openstack" "OpenStack CLI" "independent"
+    
     # Step 1: Add stack user
     if ! id -u $STACK_USER >/dev/null 2>&1; then
 	echo "Adding stack user..."
@@ -182,6 +213,9 @@ EOF
 #source "$MAIN_DIRECTORY_LOCATION/setup_shib_sp.sh"
 # Include the Shibboleth SP setup function
 install_shib_sp() {
+    # Check if Shibboleth-SP is already installed
+    check_command_exists "shibd" "Shibboleth-SP" "independent"
+    
     echo "Starting installation of Shibboleth SP..."
 
     # Step 1: Update and upgrade the system
@@ -211,6 +245,10 @@ install_shib_sp() {
 
 
 configure_shib_sp() {
+    # check_dependency "SHIBSP_INSTALLED"
+    check_command_exists "shibd" "Shibboleth-SP" "dependent"
+    
+
     echo "Starting Shibboleth SP configuration..."
     local RANDOM_UUID="$(uuidgen)"
     local SP_ENTITY_ID="http://devstack.sait.${RANDOM_UUID}/shibboleth"
@@ -295,6 +333,9 @@ configure_shib_sp() {
 
 # Function to enable debugging for Keystone
 configure_keystone_debugging() {
+    # check_dependency "DEVSTACK_INSTALLED"
+    check_command_exists "openstack" "OpenStack CLI" "dependent"
+    
     # we  Must Run it as user: stack
     echo "Configuring Keystone debugging..."
 
@@ -365,6 +406,10 @@ EOF
 
 
 configure_horizon_websso(){
+    # check_dependency "DEVSTACK_INSTALLED"
+    check_command_exists "openstack" "OpenStack CLI" "dependent"
+    
+
     echo "Configuring Horizon for SSO..."
     # sudo chown stack:stack "$MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py"
     # sudo chmod 744 "$MAIN_DIRECTORY_LOCATION/configure_horizon_websso.py"
@@ -384,6 +429,9 @@ EOF
 
 
 create_federation_resources_at_keystone_cli() {
+    # check_dependency "DEVSTACK_INSTALLED"
+    check_command_exists "openstack" "OpenStack CLI" "dependent"
+    
     echo "Creating federation resources in Keystone..."
 
     local idp_csv_file="${SUPPORTING_FILES}/idp_list.csv"
@@ -498,6 +546,9 @@ EOF
 
 
 configure_keystone_federation(){
+    # check_dependency "DEVSTACK_INSTALLED"
+    check_command_exists "openstack" "OpenStack CLI" "dependent"
+    
     echo "Configuring DevStack for SAML Federation..."
 
     # Define variables
@@ -704,6 +755,9 @@ CONF
 }
 
 configure_keystone_apache(){
+    # check_dependency "DEVSTACK_INSTALLED"
+    check_command_exists "openstack" "OpenStack CLI" "dependent"
+    
     echo "Configuring Keystone's Apache conf file..."
     local KEYSTONE_APACHE_CONFIG_PATH="/etc/apache2/sites-available/keystone-wsgi-public.conf"
     local PROXYPASS_DIRECTIVE='ProxyPass "/identity" "unix:/var/run/uwsgi/keystone-wsgi-public.socket|uwsgi://uwsgi-uds-keystone-wsgi-public" retry=0 acquire=1'
@@ -758,6 +812,9 @@ for option in "$@"; do
             ;;
         configure_shibsp)
             configure_shib_sp
+            ;;
+        configure_keystone_debugging)
+            configure_keystone_debugging
             ;;
         horizon_websso)
             configure_horizon_websso
