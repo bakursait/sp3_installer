@@ -30,7 +30,7 @@ echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
 usage(){
-    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli|configure_keystone_federation}"
+    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli|configure_keystone_federation|configure_keystone_apache}"
     echo "You must specify at least one option to run the script."
     exit 1
 }
@@ -576,6 +576,173 @@ EOF
 
 
 
+
+
+
+
+
+
+# Add fixed directives if not already present
+add_fixed_directives() {
+    echo "Adding fixed directives to Apache configuration if not present..."
+    local KEYSTONE_APACHE_CONFIG_PATH="/etc/apache2/sites-available/keystone-wsgi-public.conf"
+    local PROTOCOL="saml2"  # Protocol used for federation
+
+    # Check and add "Proxypass Shibboleth.sso !" if not present
+    if ! grep -q "Proxypass Shibboleth.sso !" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+        cat <<EOF >> "$KEYSTONE_APACHE_CONFIG_PATH"
+
+# Fixed Directives
+Proxypass Shibboleth.sso !
+
+EOF
+        echo "Fixed directive: \"Proxypass Shibboleth.sso !\" added."
+    else
+        echo "Fixed directive: \"Proxypass Shibboleth.sso !\" already present. Skipping."
+    fi
+
+
+
+
+    # Check and add "<Location /Shibboleth.sso>" block if not present
+    if ! grep -q "<Location /Shibboleth.sso>" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+        cat <<EOF >> "$KEYSTONE_APACHE_CONFIG_PATH"
+
+<Location /Shibboleth.sso>
+   SetHandler shib
+</Location>
+
+EOF
+        echo "Fixed directive: \"<Location /Shibboleth.sso>\" added."
+    else
+        echo "Fixed directive: \"<Location /Shibboleth.sso>\" already present. Skipping."
+    fi
+
+
+    # Check and add "<Location /identity/v3/auth/OS-FEDERATION/websso/$PROTOCOL>" block if not present
+    if ! grep -q "<Location /identity/v3/auth/OS-FEDERATION/websso/$PROTOCOL>" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+        cat <<EOF >> "$KEYSTONE_APACHE_CONFIG_PATH"
+
+<Location /identity/v3/auth/OS-FEDERATION/websso/$PROTOCOL>
+    Require valid-user
+    AuthType shibboleth
+    ShibRequestSetting requireSession 1
+    ShibExportAssertion off
+    <IfVersion < 2.4>
+        ShibRequireSession On
+        ShibRequireAll On
+    </IfVersion>
+</Location>
+
+EOF
+        echo "Fixed directive: \"<Location /identity/v3/auth/OS-FEDERATION/websso/$PROTOCOL>\" added."
+    else
+        echo "Fixed directive: \"<Location /identity/v3/auth/OS-FEDERATION/websso/$PROTOCOL>\" already present. Skipping."
+    fi
+
+}
+
+# Add IDP-specific directives if not already present
+add_idp_directives() {
+    echo "Adding IDP-specific directives to Apache configuration..."
+    local IDP_LIST_FILE="$SUPPORTING_FILES/idp_list.csv"
+    local KEYSTONE_APACHE_CONFIG_PATH="/etc/apache2/sites-available/keystone-wsgi-public.conf"
+    local PROTOCOL="saml2"
+
+    # Skip header and process each IDP
+    tail -n +2 "$IDP_LIST_FILE" | while IFS=";" read -r fqdn idp_entity_id idp_backup_file idp_keystone_name idp_horizon_name idp_mapping_rules; do
+        echo "Processing IDP: $idp_keystone_name"
+
+        # Check if the IDP-specific directives already exist
+        if ! grep -q "/identity/v3/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/auth" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+            cat <<CONF >> "$KEYSTONE_APACHE_CONFIG_PATH"
+
+# Directive for $idp_keystone_name
+<Location /identity/v3/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/auth>
+    Require valid-user
+    AuthType shibboleth
+    ShibRequestSetting requireSession 1
+    ShibRequestSetting entityID $idp_entity_id
+    ShibExportAssertion off
+    <IfVersion < 2.4>
+        ShibRequireSession On
+        ShibRequireAll On
+    </IfVersion>
+</Location>
+CONF
+        echo "Directive for $idp_keystone_name: \"<Location /identity/v3/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/auth>\" added."
+    else
+        echo "Directive for $idp_keystone_name: \"<Location /identity/v3/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/auth>\" already present. Skipping."
+    fi
+
+
+
+
+    # Check if the IDP-specific directives already exist
+    if ! grep -q "/identity/v3/auth/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/websso" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+        cat <<CONF >> "$KEYSTONE_APACHE_CONFIG_PATH"
+# Directive for $idp_keystone_name
+<Location /identity/v3/auth/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/websso>
+    Require valid-user
+    AuthType shibboleth
+    ShibRequestSetting requireSession 1
+    ShibRequestSetting entityID $idp_entity_id
+    ShibExportAssertion off
+    <IfVersion < 2.4>
+        ShibRequireSession On
+        ShibRequireAll On
+    </IfVersion>
+</Location>
+
+CONF
+        echo "Directive for $idp_keystone_name: \"<Location /identity/v3/auth/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/websso>\" added."
+    else
+        echo "Directive for $idp_keystone_name: \"<Location /identity/v3/auth/OS-FEDERATION/identity_providers/$idp_keystone_name/protocols/$PROTOCOL/websso>\" already present. Skipping."
+    fi
+
+    done
+}
+
+configure_keystone_apache(){
+    echo "Configuring Keystone's Apache conf file..."
+    local KEYSTONE_APACHE_CONFIG_PATH="/etc/apache2/sites-available/keystone-wsgi-public.conf"
+    local PROXYPASS_DIRECTIVE='ProxyPass "/identity" "unix:/var/run/uwsgi/keystone-wsgi-public.socket|uwsgi://uwsgi-uds-keystone-wsgi-public" retry=0 acquire=1'
+
+    # Ensure we are running as root
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "Error: This function must be run as root."
+        exit 1
+    fi
+
+    # Ensure the ProxyPass directive exists at the top of the file
+    if ! grep -Fxq "$PROXYPASS_DIRECTIVE" "$KEYSTONE_APACHE_CONFIG_PATH"; then
+        echo "Adding required ProxyPass directive to the top of $KEYSTONE_APACHE_CONFIG_PATH..."
+        sudo sed -i "1i $PROXYPASS_DIRECTIVE" "$KEYSTONE_APACHE_CONFIG_PATH"
+        echo "ProxyPass directive added."
+    else
+        echo "ProxyPass directive already present. Skipping."
+    fi
+
+    add_fixed_directives
+
+    add_idp_directives
+    
+    # Restart Apache service
+    echo "Restarting Apache service..."
+    if sudo systemctl restart apache2.service; then
+        echo "Apache service restarted successfully."
+    else
+        echo "Error: Failed to restart Apache service."
+        exit 1
+    fi
+
+    echo "Keystone Apache configuration updated successfully."
+}
+
+
+
+
+
 if [[ $# -eq 0 ]]; then
     usage
 fi
@@ -600,6 +767,9 @@ for option in "$@"; do
             ;;
         configure_keystone_federation)
             configure_keystone_federation
+            ;;
+        configure_keystone_apache)
+            configure_keystone_apache
             ;;
         *)
             echo "Invalid option: $option"
