@@ -26,9 +26,18 @@ export DEBIAN_FRONTEND=noninteractive
 echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
 
 
-usage(){
-    echo "Usage: $0 {devstack|shibsp|configure_shibsp|horizon_websso|configure_keystone_cli|configure_keystone_federation|configure_keystone_apache}"
-    echo "You must specify at least one option to run the script."
+usage() {
+    echo -e "\n\033[1;33mUsage:\033[0m $0 {option}"
+    echo -e "\n\033[1;32mAvailable Options:\033[0m"
+    echo -e "  \033[1;34mdevstack\033[0m                  Install and configure DevStack."
+    echo -e "  \033[1;34mshibsp\033[0m                    Install and configure Shibboleth-SP."
+    echo -e "  \033[1;34mconfigure_shibsp\033[0m         Configure Shibboleth-SP settings."
+    echo -e "  \033[1;34mconfigure_keystone_debugging\033[0m Enable debugging for Keystone."
+    echo -e "  \033[1;34mhorizon_websso\033[0m          Configure Horizon for WebSSO."
+    echo -e "  \033[1;34mconfigure_keystone_cli\033[0m   Configure Keystone CLI settings."
+    echo -e "  \033[1;34mconfigure_keystone_federation\033[0m Set up Keystone federation."
+    echo -e "  \033[1;34mconfigure_keystone_apache\033[0m Configure Keystone Apache settings."
+    echo -e "\n\033[1;31mError:\033[0m You must specify at least one valid option to run the script."
     exit 1
 }
 
@@ -325,8 +334,6 @@ configure_shib_sp() {
     # Step 9: copy attribute-map.xml file to the shibboleth working directory:
     sudo cp "${SUPPORTING_FILES}/attribute-map.xml" /etc/shibboleth/
 
-
-    configure_keystone_debugging
 }
 
 
