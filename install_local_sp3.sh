@@ -4,9 +4,6 @@
 MAIN_DIRECTORY_LOCATION="$(cd "$(dirname "$0")" && pwd)"
 SUPPORTING_FILES="${MAIN_DIRECTORY_LOCATION}/sp3_supporting_files"
 # Define variables
-RANDOM_UUID="$(uuidgen)"
-SP_ENTITY_ID="http://devstack.sait.${RANDOM_UUID}/shibboleth"
-SP_METADATA_FILE="/etc/shibboleth/devstack.sait.${RANDOM_UUID}-metadata.xml"
 SHIBBOLETH_XML="/etc/shibboleth/shibboleth2.xml"
 
 DEVSTACK_BRANCH="stable/2023.2"
@@ -215,6 +212,9 @@ install_shib_sp() {
 
 configure_shib_sp() {
     echo "Starting Shibboleth SP configuration..."
+    local RANDOM_UUID="$(uuidgen)"
+    local SP_ENTITY_ID="http://devstack.sait.${RANDOM_UUID}/shibboleth"
+    local SP_METADATA_FILE="/etc/shibboleth/devstack.sait.${RANDOM_UUID}-metadata.xml"
 
     # Backup the original Shibboleth XML file
     sudo cp "$SHIBBOLETH_XML" "${SHIBBOLETH_XML}.bak"
@@ -279,7 +279,7 @@ configure_shib_sp() {
     echo "Testing Shibboleth daemon configuration..."
     sudo shibd -t || { echo "shibd configuration test failed. Check logs."; exit 1; }
 
-    echo "Shibboleth SP configuration complete!"
+    echo "Download the shibboleth-SP Metadata"
     sudo wget "http://${HOST_IP}/Shibboleth.sso/Metadata" -O "${SP_METADATA_FILE}"
     sudo chown _shibd: "${SP_METADATA_FILE}"
     echo "SP metadata available at ${SP_METADATA_FILE}"
