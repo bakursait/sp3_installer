@@ -122,6 +122,8 @@ add_idps(){
 }
 
 register_idps(){
+    check_command_exists "shibd" "Shibboleth-SP" "dependent"
+    
     #Step 1: Add IdPs as <MetadataProvider .../> elements in /etc/shibboleth/shibboleth2.xml file:
     add_idps
     
@@ -139,9 +141,8 @@ register_idps(){
     echo "Testing Shibboleth daemon configuration..."
     sudo shibd -t || { echo "shibd configuration test failed. Check logs."; exit 1; }
 
-    echo -e "\n\033[1;31mInfo: to fully register the IdPs, consider running the following functions in the list."
+    echo -e "\n\033[1;31mInfo: to fully register the IdPs, consider running other functions in the list \"./install_local_sp3.sh <option>\"."
     echo -e "\n\033[1;31mNOTE: \033[0m Add the IdPs domain names with their IPs at the SP's /etc/hosts file and at all your network's /etc/hosts files"
-    ;;
 }
 
 
