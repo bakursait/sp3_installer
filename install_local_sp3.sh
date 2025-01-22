@@ -31,7 +31,8 @@ usage() {
     echo -e "\n\033[1;32mAvailable Options:\033[0m"
     echo -e "  \033[1;34mdevstack\033[0m                  Install and configure DevStack."
     echo -e "  \033[1;34mshibsp\033[0m                    Install and configure Shibboleth-SP."
-    echo -e "  \033[1;34mconfigure_shibsp\033[0m         Configure Shibboleth-SP settings."
+    echo -e "  \033[1;34mconfigure_shibsp\033[0m          Configure Shibboleth-SP settings."
+    echo -e "  \033[1;34mregister_idps\033[0m             Register IdPs from idp_list.csv file into shibboleth2.xml as MetadataProvider elements."
     echo -e "  \033[1;34mconfigure_keystone_debugging\033[0m Enable debugging for Keystone."
     echo -e "  \033[1;34mhorizon_websso\033[0m          Configure Horizon for WebSSO."
     echo -e "  \033[1;34mconfigure_keystone_cli\033[0m   Configure Keystone CLI settings."
@@ -118,6 +119,29 @@ add_idps(){
 	# add validate=\"true\"
 	sudo sed -i "/<Errors/s|/>|/>\n\n    <MetadataProvider type=\"XML\" validate=\"true\" url=\"$idp_entity_id\" backingFilePath=\"$idp_backup_file\" maxRefreshDelay=\"720000\" />|" "${SHIBBOLETH_XML}" || { echo "failed adding idps. Check logs."; exit 1; }
     done
+}
+
+register_idps(){
+    #Step 1: Add IdPs as <MetadataProvider .../> elements in /etc/shibboleth/shibboleth2.xml file:
+    add_idps
+    
+    #Step 2: check the syntax of the file /etc/shibboleth/shibboleth2.xml:
+    validate_xml_file "$SHIBBOLETH_XML"
+    
+    echo "Shibboleth SP configuration complete!"
+    
+    #Step 3: Restart the affected systems:
+    echo "Restarting services to apply changes..."
+    sudo systemctl restart shibd.service
+    sudo systemctl restart apache2.service
+    
+    # Step 8: Test shibd configuration and to run over all the IdP <MetadataProvider .../> elements and get their Metadata cached at: /var/cache/shibboleth/:
+    echo "Testing Shibboleth daemon configuration..."
+    sudo shibd -t || { echo "shibd configuration test failed. Check logs."; exit 1; }
+
+    echo -e "\n\033[1;31mInfo: to fully register the IdPs, consider running the following functions in the list."
+    echo -e "\n\033[1;31mNOTE: \033[0m Add the IdPs domain names with their IPs at the SP's /etc/hosts file and at all your network's /etc/hosts files"
+    ;;
 }
 
 
@@ -819,6 +843,9 @@ for option in "$@"; do
             ;;
         configure_shibsp)
             configure_shib_sp
+            ;;
+        register_idps)
+            register_idps
             ;;
         configure_keystone_debugging)
             configure_keystone_debugging
