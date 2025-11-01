@@ -1,3 +1,4 @@
 fqdn;idp_entity_id;idp_backup_file;idp_keystone_name;idp_horizon_name;idp_mapping_rules
-idp.localtest;https://idp.localtest/idp/shibboleth;idp.localtest-metadata.xml;demoidp;demoidp-websso;demoidp
-idp.localtest1;https://idp.localtest1/idp/shibboleth;idp.localtest1-metadata.xml;demoidp1;demoidp1-websso;demoidp1
+idp1.localtest2.lab;https://idp1.localtest2.lab/idp/shibboleth;idp1-localtest2-lab-metadata.xml;demo-idp1-localtest2-lab;demo-idp1-localtest2-lab-websso;demo-idp1-localtest2-lab-mapping
+idp.localtest1;https://idp.localtest1/idp/shibboleth;idp-localtest1-metadata.xml;demo-idp-localtest1;demo-idp-localtest1-websso;demo-idp-localtest1-mapping
+
