@@ -62,6 +62,18 @@ usage() {
     exit 1
 }
 
+setup_the_environment(){
+    echo "Installing required packages..."
+    sudo apt-get install -y ca-certificates
+    sudo apt-get install -y emacs
+    sudo apt-get install -y openssl
+    sudo apt-get install -y xmlstarlet
+    sudo apt-get install -y curl
+    sudo apt-get install -y wget
+    sudo apt-get install -y crudini
+    sudo apt-get install -y acl
+}
+
 
 
 DEBUG=0
@@ -235,6 +247,12 @@ validate_xml_file(){
     fi
 }
 
+
+
+
+
+
+
 setup_devstack() {
     #check_command_exists "openstack" "OpenStack CLI" "independent"
     
@@ -311,7 +329,8 @@ EOF
 
     # Step 10.2: Install required Access Control List (acl) package
     echo "Installing ACL package..."
-    sudo apt-get install -y acl
+    setup_the_environment
+    #sudo apt-get install -y acl
 
     # Step 11: let the user: "$STACK_USER" have access to all required files in the original $USER's home directory
     sudo setfacl -R -m u:$STACK_USER:r-x "$HOME"
@@ -351,7 +370,8 @@ install_shib_sp() {
 
     # Step 2: Install required packages
     echo "Installing required packages..."
-    sudo apt-get install -y ca-certificates emacs openssl xmlstarlet curl wget crudini
+    setup_the_environment
+    #sudo apt-get install -y ca-certificates emacs openssl xmlstarlet curl wget crudini acl
 
     # Step 3: Install Shibboleth SP
     echo "Installing Shibboleth SP and related packages..."
@@ -477,7 +497,8 @@ set -euo pipefail
 # Use sudo for system files since we’re the stack user here
 if ! command -v crudini >/dev/null 2>&1; then
   sudo apt-get update -y
-  sudo apt-get install -y crudini
+  setup_the_environment
+  #sudo apt-get install -y crudini
 fi
 
 CONF="$KEYSTONE_MAIN_CONF"
@@ -810,8 +831,9 @@ configure_keystone_federation() {
 
   # Ensure crudini is available
   if ! command -v crudini >/dev/null 2>&1; then
-    sudo apt-get update -y
-    sudo apt-get install -y crudini
+      sudo apt-get update -y
+      setup_the_environment  
+      #sudo apt-get install -y crudini
   fi
 
   sudo bash <<EOF
