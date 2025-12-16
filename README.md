@@ -38,12 +38,23 @@ We tested the system on:
 1. **Clone the Repository**:
    ```bash
    git clone git@github.com:bakursait/sp3_installer.git
-   cd sp3_supporting_files/
+   mv -r sp3_supporting_files /opt/
+   cd /opt/sp3_supporting_files/
    ```
+2. **Lines to be changed in the script according to your machine setup**:
+  - Access the script file: `/opt/sp3_supporting_files/install_local_sp3.sh`
+  - Edit the following lines according to your device setup:
+  ```bash
+  HOST_IP="192.168.4.224"
+  ADMIN_PASSWORD="secret"
+  SHIB_HOSTNAME="sp2.home.lab"
+  ```
+  - There are other lines you can configure. they are about the Devstack version and other setup.
+  - You can keep them as they are because we have tested these setup and it works.
 
-2. **Run the Script**:
+3. **Run the Script**:
    ```bash
-   ./install_local_sp3.sh <option>
+   sudo ./install_local_sp3.sh <option>
    ```
 
 ---
@@ -52,14 +63,18 @@ We tested the system on:
 
 ### Available Options
 The script supports the following operations:
-- **`devstack`**: Install and configure OpenStack DevStack.
+- **`setup_environment`**: Install All required packages. MUST RUN FIRST
+- **`set_hostname`**: Setup Hostname based on the hostname availble in the script. default: `sp2.home.lab`
 - **`shibsp`**: Install and configure Shibboleth Service Provider (SP).
 - **`configure_shibsp`**: Configure Shibboleth-SP for federation.
+- **`devstack`**: Install and configure OpenStack DevStack.
+- **`register_idps`**: Register IdPs from idp_list.csv file into shibboleth2.xml as MetadataProvider elements.
 - **`configure_keystone_debugging`**: Enable debugging in Keystone.
 - **`horizon_websso`**: Configure Horizon for WebSSO.
 - **`configure_keystone_cli`**: Create federation resources in Keystone CLI.
 - **`configure_keystone_federation`**: Complete federation configuration in Keystone.
 - **`configure_keystone_apache`**: Update the Keystone Apache vhost configuration. -- **MUST** run with `sudo` privileges.
+
 
 ### Example Usage
 ```bash

@@ -16,9 +16,9 @@ DEVSTACK_BRANCH="stable/2025.2"
 STACK_USER="stack"
 STACK_USER_HOME="/opt/${STACK_USER}"
 DEVSTACK_HOME="${STACK_USER_HOME}/devstack"
-HOST_IP="192.168.4.221"
+HOST_IP="192.168.4.224"
 ADMIN_PASSWORD="secret"
-SHIB_HOSTNAME="sp1.localtest2.lab"
+SHIB_HOSTNAME="sp2.home.lab"
 
 KEYSTONE_MAIN_CONF="/etc/keystone/keystone.conf"
 HORIZON_SETTINGS_FILE="~/horizon/openstack_dashboard/local/local_settings.py"
@@ -48,6 +48,7 @@ echo_message(){
 usage() {
     echo -e "\n\033[1;33mUsage:\033[0m $0 {option}"
     echo -e "\n\033[1;32mAvailable Options:\033[0m"
+    echo -e "  \033[1;34msetup_environment\033[0m	        Install All required packages. MUST RUN FIRST"
     echo -e "  \033[1;34mset_hostname\033[0m              Setup Hostname."
     echo -e "  \033[1;34mshibsp\033[0m                    Install and configure Shibboleth-SP."
     echo -e "  \033[1;34mconfigure_shibsp\033[0m          Configure Shibboleth-SP settings."
@@ -1097,6 +1098,9 @@ fi
 # Execute the requested functions:
 for option in "$@"; do
     case $option in
+    	setup_environment)
+            setup_the_environment | tee -a "${INSTALLER_LOG_FILE}"
+	    ;;
         set_hostname)
             setup_hostname | tee -a "${INSTALLER_LOG_FILE}"
             ;;
